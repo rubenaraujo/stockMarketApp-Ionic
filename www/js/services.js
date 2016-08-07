@@ -1,5 +1,188 @@
 angular.module('yourAppsName.services', [])
 
+.constant('FIREBASE_URL','https://stokmarketapp-pre.firebase.com')
+
+.factory('firebaseRef', function($firebase, FIREBASE_URL) {
+
+  var firebaseRef = new Firebase(FIREBASE_URL);
+
+  return firebaseRef;
+})
+
+
+.factory('userService', function($rootScope, $window, $timeout, firebaseRef, firebaseUserRef, myStocksArrayService, myStocksCacheService, notesCacheService, modalService) {
+
+  var login = function(user, signup) {
+
+    firebaseRef.authWithPassword({
+      email    : user.email,
+      password : user.password
+    }, function(error, authData) {
+      if (error) {
+        console.log("Login Failed!", error);
+      } else {
+        $rootScope.currentUser = authData;
+
+        if(signup) {
+          modalService.closeModal();
+        }
+        else {
+          myStocksCacheService.removeAll();
+          notesCacheService.removeAll();
+
+          loadUserData(authData);
+
+          modalService.closeModal();
+          $timeout(function() {
+            $window.location.reload(true);
+          }, 400);
+        }
+      }
+    });
+  };
+
+  var signup = function(user) {
+
+    firebaseRef.createUser({
+      email    : user.email,
+      password : user.password
+    }, function(error, userData) {
+      if (error) {
+        console.log("Error creating user:", error);
+      } else {
+        login(user, true);
+        firebaseRef.child('emails').push(user.email);
+        firebaseUserRef.child(userData.uid).child('stocks').set(myStocksArrayService);
+
+        var stocksWithNotes = notesCacheService.keys();
+
+        stocksWithNotes.forEach(function(stockWithNotes) {
+          var notes = notesCacheService.get(stockWithNotes);
+
+          notes.forEach(function(note) {
+            firebaseUserRef.child(userData.uid).child('notes').child(note.ticker).push(note);
+          });
+        });
+      }
+    });
+  };
+
+  var logout = function() {
+    firebaseRef.unauth();
+    notesCacheService.removeAll();
+    myStocksCacheService.removeAll();
+    $window.location.reload(true);
+    $rootScope.currentUser = '';
+  };
+
+  var updateStocks = function(stocks) {
+    firebaseUserRef.child(getUser().uid).child('stocks').set(stocks);
+  };
+
+  var updateNotes = function(ticker, notes) {
+    firebaseUserRef.child(getUser().uid).child('notes').child(ticker).remove();
+    notes.forEach(function(note) {
+      firebaseUserRef.child(getUser().uid).child('notes').child(note.ticker).push(note);
+    });
+  };
+
+  var loadUserData = function(authData) {
+
+    firebaseUserRef.child(authData.uid).child('stocks').once('value', function(snapshot) {
+      var stocksFromDatabase = [];
+
+      snapshot.val().forEach(function(stock) {
+        var stockToAdd = {ticker: stock.ticker};
+        stocksFromDatabase.push(stockToAdd);
+      });
+
+      myStocksCacheService.put('myStocks', stocksFromDatabase);
+    },
+    function(error) {
+      console.log("Firebase error –> stocks" + error);
+    });
+
+    firebaseUserRef.child(authData.uid).child('notes').once('value', function(snapshot) {
+
+      snapshot.forEach(function(stocksWithNotes) {
+        var notesFromDatabase = [];
+        stocksWithNotes.forEach(function(note) {
+          notesFromDatabase.push(note.val());
+          var cacheKey = note.child('ticker').val();
+          notesCacheService.put(cacheKey, notesFromDatabase);
+        });
+      });
+    },
+    function(error) {
+      console.log("Firebase error –> notes: " + error);
+    });
+  };
+
+  var getUser = function() {
+    return firebaseRef.getAuth();
+  };
+
+  if(getUser()) {
+    $rootScope.currentUser = getUser();
+  }
+
+  return {
+    login: login,
+    signup: signup,
+    logout: logout,
+    updateStocks: updateStocks,
+    updateNotes: updateNotes,
+    getUser: getUser
+  };
+})
+
+
+.service('modalService', function($ionicModal) {
+
+  this.openModal = function(id) {
+
+    var _this = this;
+
+    if(id == 1) {
+      $ionicModal.fromTemplateUrl('templates/search.html', {
+        scope: null,
+        controller: 'SearchCtrl'
+      }).then(function(modal) {
+        _this.modal = modal;
+        _this.modal.show();
+      });
+    }
+    else if(id == 2) {
+      $ionicModal.fromTemplateUrl('templates/login.html', {
+        scope: null,
+        controller: 'LoginSearchCtrl'
+      }).then(function(modal) {
+        _this.modal = modal;
+        _this.modal.show();
+      });
+    }
+    else if(id == 3) {
+      $ionicModal.fromTemplateUrl('templates/signup.html', {
+        scope: null,
+        controller: 'LoginSearchCtrl'
+      }).then(function(modal) {
+        _this.modal = modal;
+        _this.modal.show();
+      });
+    }
+  };
+
+  this.closeModal = function() {
+
+    var _this = this;
+
+    if(!_this.modal) return;
+    _this.modal.hide();
+    _this.modal.remove();
+  };
+
+})
+
 .factory('encodeURIService', function() {
   return {
     encode: function(string) {
@@ -29,7 +212,7 @@ angular.module('yourAppsName.services', [])
   };
 })
 
-.factory('stockDataService', function($q, $http, encodeURIService, stockDetailsCacheService){
+.factory('stockDataService', function($q, $http, encodeURIService, stockDetailsCacheService, stockPriceCacheService){
 
   var getDetailsData = function(ticker) {
 
@@ -64,11 +247,15 @@ angular.module('yourAppsName.services', [])
   var getPriceData = function(ticker) {
 
     var deferred = $q.defer(),
+
+    cacheKey = ticker,
+
     url = "http://finance.yahoo.com/webservice/v1/symbols/" + ticker + "/quote?format=json&view=detail";
     $http.get(url)
     .success(function(json){
       var jsonData = json.list.resources[0].resource.fields;
       deferred.resolve(jsonData);
+      stockPriceCacheService.put(cacheKey, jsonData);
     })
     .error(function(error) {
       console.log("Price data error: " + error);
@@ -83,6 +270,155 @@ angular.module('yourAppsName.services', [])
     getDetailsData: getDetailsData
   };
 
+})
+
+.factory('stockPriceCacheService', function(CacheFactory) {
+
+  var stockPriceCache;
+
+  if(!CacheFactory.get('stockPriceCache')) {
+    stockPriceCache = CacheFactory('stockPriceCache', {
+      maxAge: 5 * 1000,
+      deleteOnExpire: 'aggressive',
+      storageMode: 'localStorage'
+    });
+  }
+  else {
+    stockPriceCache = CacheFactory.get('stockPriceCache');
+  }
+
+  return stockPriceCache;
+})
+
+.factory('followStockService', function(myStocksArrayService, myStocksCacheService/*, userService*/) {
+
+  return {
+
+    follow: function(ticker) {
+
+     var stockToAdd = {"ticker": ticker};
+
+      myStocksArrayService.push(stockToAdd);
+      myStocksCacheService.put('myStocks', myStocksArrayService);
+
+      /*if(userService.getUser()) {
+        userService.updateStocks(myStocksArrayService);
+      }*/
+    },
+
+    unfollow: function(ticker) {
+
+      for (var i = 0; i < myStocksArrayService.length; i++) {
+        if(myStocksArrayService[i].ticker == ticker) {
+
+          myStocksArrayService.splice(i, 1);
+          myStocksCacheService.remove('myStocks');
+          myStocksCacheService.put('myStocks', myStocksArrayService);
+
+          /*if(userService.getUser()) {
+            userService.updateStocks(myStocksArrayService);
+          }*/
+
+          break;
+        }
+      }
+    },
+
+    checkFollowing: function(ticker) {
+
+      for (var i = 0; i < myStocksArrayService.length; i++) {
+        if(myStocksArrayService[i].ticker == ticker) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+  };
+})
+
+.factory('searchService', function($q, $http) {
+
+    return {
+
+      search: function(query) {
+
+        var deferred = $q.defer(),
+
+          // sometimes I have to copy and repaste the string below into the
+          // url variable for it to work. Not sure why that is.
+          // https://s.yimg.com/aq/autoc?query=aapl&region=CA&lang=en-CA
+          url = 'https://s.yimg.com/aq/autoc?query=' + query + '&region=CA&lang=en-CA&callback=JSON_CALLBACK';
+
+        $http.jsonp(url)
+          .success(function(data) {
+            var jsonData = data.ResultSet.Result;
+            deferred.resolve(jsonData);
+          })
+          .catch(function(error) {
+            console.log(error);
+          });
+
+        return deferred.promise;
+      }
+    };
+  })
+
+.factory('fillMyStocksCacheService', function(CacheFactory) {
+
+  var myStocksCache;
+
+  if(!CacheFactory.get('myStocksCache')) {
+    myStocksCache = CacheFactory('myStocksCache', {
+      storageMode: 'localStorage'
+    });
+  }
+  else {
+    myStocksCache = CacheFactory.get('myStocksCache');
+  }
+
+  var fillMyStocksCache = function() {
+
+    var myStocksArray = [
+      {ticker: "AAPL"},
+      {ticker: "GPRO"},
+      {ticker: "FB"},
+      {ticker: "NFLX"},
+      {ticker: "TSLA"},
+      {ticker: "BRK-A"},
+      {ticker: "INTC"},
+      {ticker: "MSFT"},
+      {ticker: "GE"},
+      {ticker: "BAC"},
+      {ticker: "C"},
+      {ticker: "T"}
+    ];
+
+    myStocksCache.put('myStocks', myStocksArray);
+  };
+
+  return {
+    fillMyStocksCache: fillMyStocksCache
+  };
+})
+
+.factory('myStocksCacheService', function(CacheFactory) {
+
+  var myStocksCache = CacheFactory.get('myStocksCache');
+
+  return myStocksCache;
+})
+
+//manage my stocks array
+.factory('myStocksArrayService', function(fillMyStocksCacheService, myStocksCacheService) {
+
+  if(!myStocksCacheService.info('myStocks')) {
+    fillMyStocksCacheService.fillMyStocksCache();
+  }
+
+  var myStocks = myStocksCacheService.get('myStocks');
+
+  return myStocks;
 })
 
 .factory('chartDataCacheService', function(CacheFactory) {
@@ -191,7 +527,7 @@ angular.module('yourAppsName.services', [])
       var deferred = $q.defer(),
 
       x2js = new X2JS(),
-      url = "http://finance.yaho.com/rss/headline?s=" + ticker;
+      url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=" + ticker + "&region=US&lang=en-US";
       $http.get(url)
       .success(function(xml) {
         var xmlDoc = x2js.parseXmlString(xml),

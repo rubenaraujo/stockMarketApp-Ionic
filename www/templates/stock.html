@@ -1,8 +1,19 @@
 <ion-view view-title="{{ticker}}" drag-content="false">
 
+<!--
+  <ion-nav-buttons side="right">
+    <button id="app-info" class="button button-icon icon ion-stats-bars" ng-click="showPopup()"> StockViewer
+    </button>
+  </ion-nav-buttons>
+-->
+
   <ion-nav-bar id="stock-navbar" class="bar-dark ng-style:reactiveColor">
     <ion-nav-back-button></ion-nav-back-button>
   </ion-nav-bar>
+
+  <ion-nav-buttons side="right">
+    <button class="button icon-left ng-style:reactiveColor" ng-class="following ? 'ion-ios-checkmark-empty' : 'ion-ios-plus'" ng-bind="following ? 'Following' : 'Follow'" ng-click="toggleFollow()"></button>
+  </ion-nav-buttons>
 
   <div class="bar bar-subheader bar-light" id="stock-subheader-bar">
 
@@ -107,8 +118,8 @@
       <div class="item item-divider">News</div>
       <a class="item item-icon-right" ng-repeat="story in newsStories" ng-click="openWindow(story.link)">
         <h2>{{story.title}}</h2>
-        <h6>{{story.pubDate}}</h6>
-        <p ng-if="story.description.length"></p>
+        <h6>{{story.pubDate | characters:17:false:false}}</h6>
+        <p ng-if="story.description.length > 0">{{story.description | characters:200:false:true}}</p>
         <i class="icon ion-ios-arrow-right"></i>
       </a>
     </div>

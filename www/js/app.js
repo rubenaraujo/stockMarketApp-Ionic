@@ -4,6 +4,8 @@
 // 'starter.controllers' is found in controllers.js
 angular.module('yourAppsName', [
 'ionic',
+'firebase',
+'ngCordova',
 'angular-cache',
 'nvd3',
 'cb.x2js',

@@ -6,6 +6,10 @@
   },
   "dependencies": {
     "angular-cache": "^4.5.0",
-    "angular-x2js": "^0.2.0"
+    "angular-x2js": "^0.2.0",
+    "ngCordova": "^0.1.26-alpha"
+  },
+  "resolutions": {
+    "angular": "~1.x"
   }
 }

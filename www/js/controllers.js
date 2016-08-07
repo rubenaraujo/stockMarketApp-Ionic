@@ -1,75 +1,74 @@
 angular.module('yourAppsName.controllers', [])
 
-.controller('AppCtrl', function($scope, $ionicModal, $timeout) {
+.controller('AppCtrl', ['$scope', 'modalService',// 'userService',
+  function($scope, modalService/*, userService*/) {
 
-  // With the new view caching in Ionic, Controllers are only called
-  // when they are recreated or on app start, instead of every page change.
-  // To listen for when this page is active (for example, to refresh data),
-  // listen for the $ionicView.enter event:
-  //$scope.$on('$ionicView.enter', function(e) {
-  //});
-  $scope.playlists = [
-    { title: 'Reggae', id: 1 },
-    { title: 'Chill', id: 2 },
-    { title: 'Dubstep', id: 3 },
-    { title: 'Indie', id: 4 },
-    { title: 'Rap', id: 5 },
-    { title: 'Cowbell', id: 6 }
-  ];
+    $scope.modalService = modalService;
 
-  // Form data for the login modal
-  $scope.loginData = {};
+    /*$scope.logout = function() {
+      userService.logout();
+    };*/
 
-  // Create the login modal that we will use later
-  $ionicModal.fromTemplateUrl('templates/login.html', {
-    scope: $scope
-  }).then(function(modal) {
-    $scope.modal = modal;
-  });
-
-  // Triggered in the login modal to close it
-  $scope.closeLogin = function() {
-    $scope.modal.hide();
-  };
-
-  // Open the login modal
-  $scope.login = function() {
-    $scope.modal.show();
-  };
-
-  // Perform the login action when the user submits the login form
-  $scope.doLogin = function() {
-    console.log('Doing login', $scope.loginData);
-
-    // Simulate a login delay. Remove this and replace with your login
-    // code if using a login system
-    $timeout(function() {
-      $scope.closeLogin();
-    }, 1000);
-  };
-
-
-})
-
-.controller('MyStocksCtrl', ['$scope',
-function($scope) {
-  $scope.MyStocksArray = [
-    {ticker: "AAPL"},
-    {ticker: "FB"},
-    {ticker: "NFLX"},
-    {ticker: "TSLA"},
-    {ticker: "INTC"},
-    {ticker: "MSPT"},
-    {ticker: "GE"},
-    {ticker: "BAC"},
-    {ticker: "C"},
-    {ticker: "T"},
-    {ticker: "GPRO"}
-  ];
 }])
 
-.controller('StockCtrl', ['$scope', '$stateParams', '$window', '$ionicPopup','stockDataService', 'dateService', 'chartDataService', 'notesService', 'newsService',
-function($scope, $stateParams, $window, $ionicPopup, stockDataService, dateService, chartDataService, notesService, newsService) {
+.controller('MyStocksCtrl', ['$scope', 'myStocksArrayService', 'stockDataService', 'stockPriceCacheService', 'followStockService',
+  function($scope, myStocksArrayService, stockDataService, stockPriceCacheService, followStockService) {
+
+    $scope.$on("$ionicView.afterEnter", function() {
+      $scope.getMyStocksData();
+    });
+
+    $scope.getMyStocksData = function() {
+
+      myStocksArrayService.forEach(function(stock) {
+
+        var promise = stockDataService.getPriceData(stock.ticker);
+
+        $scope.myStocksData = [];
+
+        promise.then(function(data) {
+          $scope.myStocksData.push(stockPriceCacheService.get(data.symbol));
+        });
+      });
+
+      $scope.$broadcast('scroll.refreshComplete');
+    };
+    $scope.myStocksArray = myStocksArrayService;
+    $scope.unfollowStock = function(ticker) {
+      followStockService.unfollow(ticker);
+      $scope.getMyStocksData();
+    };
+}])
+
+
+.controller('SearchCtrl', ['$scope', '$state', 'modalService', 'searchService',
+  function($scope, $state, modalService, searchService) {
+
+    $scope.closeModal = function() {
+      modalService.closeModal();
+    };
+
+    $scope.search = function() {
+      $scope.searchResults = '';
+      startSearch($scope.searchQuery);
+    };
+
+    var startSearch = ionic.debounce(function(query) {
+      searchService.search(query)
+        .then(function(data) {
+          $scope.searchResults = data;
+        });
+    }, 400);
+
+    $scope.goToStock = function(ticker) {
+      modalService.closeModal();
+      $state.go('app.stock', {stockTicker: ticker});
+    };
+}])
+
+
+.controller('StockCtrl', ['$scope', '$stateParams', '$window', '$ionicPopup', '$cordovaInAppBrowser','stockDataService', 'dateService', 'chartDataService', 'notesService', 'followStockService', 'newsService',
+function($scope, $stateParams, $window, $ionicPopup, $cordovaInAppBrowser,stockDataService, dateService, chartDataService, notesService, followStockService, newsService) {
 
   console.log(dateService.currentDate());
   console.log(dateService.oneYearAgoDate());
@@ -78,6 +77,7 @@ function($scope, $stateParams, $window, $ionicPopup, stockDataService, dateServi
   $scope.chartView = 4;
   $scope.oneYearAgoDate = dateService.oneYearAgoDate();
   $scope.todayDate = dateService.currentDate();
+  $scope.following = followStockService.checkFollowing($scope.ticker);
 
   $scope.stockNotes = [];
 
@@ -88,6 +88,17 @@ function($scope, $stateParams, $window, $ionicPopup, stockDataService, dateServi
     getNews();
     $scope.stockNotes = notesService.getNotes($scope.ticker);
   });
+
+  $scope.toggleFollow = function() {
+     if($scope.following) {
+       followStockService.unfollow($scope.ticker);
+       $scope.following = false;
+     }
+     else {
+       followStockService.follow($scope.ticker);
+       $scope.following = true;
+     }
+   };
 
   $scope.chartViewFunc = function(n){
     $scope.chartView = n;
@@ -161,14 +172,14 @@ function($scope, $stateParams, $window, $ionicPopup, stockDataService, dateServi
   };
 
   $scope.openWindow = function(link) {
-    console.log("openWindow –> " + link);
-    /*var inAppBrowserOptions = {
+    //console.log("openWindow –> " + link);
+    var inAppBrowserOptions = {
     location: 'yes',
     clearcache: 'yes',
     toolbar: 'yes'
   };
 
-  $cordovaInAppBrowser.open(link, '_blank', inAppBrowserOptions);*/
+  $cordovaInAppBrowser.open(link, '_blank', inAppBrowserOptions);
 };
 
 function getNews() {
@@ -284,6 +295,52 @@ $scope.chartOptions = {
   noData: 'Loadind data...'
 };
 
+// When button is clicked, the popup will be shown...
+$scope.showPopup = function() {
+   $scope.data = {}
 
+   // Custom popup
+   var myPopup = $ionicPopup.alert({
+     //title: 'Don\'t eat that!',
+     template: 'Developed by Ruben Araujo',
+      //subTitle: 'Subtitle',
+      scope: $scope,
+      cssClass: 'app-info-popup',
 
-}]);
+      buttons: [
+          {
+            text: '<b>Return</b>',
+            type: 'button-positive',
+               onTap: function(e) {
+                 return;
+               }
+         }
+      ]
+   });
+
+   myPopup.then(function(res) {
+      console.log('Tapped!', res);
+   });
+};
+
+}])
+
+.controller('LoginSignupCtrl', ['$scope', 'modalService', 'userService',
+  function($scope, modalService, userService) {
+
+    $scope.user = {email: '', password: ''};
+
+    $scope.closeModal = function() {
+      modalService.closeModal();
+    };
+
+    $scope.signup = function(user) {
+      userService.signup(user);
+    };
+
+    $scope.login = function(user) {
+      userService.login(user);
+    };
+}])
+
+;
